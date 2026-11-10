@@ -1,0 +1,61 @@
+# Gleaner with live reload: edit the code (on either machine) and the running app updates.
+#   Start:  docker compose -f docker-compose.dev.yml up --build     then open http://localhost:5180
+#   Stop:   docker compose -f docker-compose.dev.yml down
+# The source is mounted from this folder; node_modules and Python packages stay in Docker.
+
+name: gleaner
+
+services:
+  backend:
+    build: ./backend
+    command: >-
+      sh -c "if [ ! -f data/gleaner.db ]; then python seed.py; fi &&
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # The local LLM runs outside Docker (in Ollama) so it can use the GPU.
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-http://host.docker.internal:11434}
+      PUBLIC_BASE_URL: http://127.0.0.1:8000
+      DATABASE_URL: sqlite:////app/data/gleaner.db
+      CORS_ORIGINS: '["http://localhost:5180","http://127.0.0.1:5180"]'
+      WATCHFILES_FORCE_POLLING: "true"
+    # Lets the container reach Ollama running on this machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      # Same database volume as docker-compose.yml, mounted over the folder's data/.
+      - gleaner-data:/app/data
+    shm_size: 1gb
+
+  frontend:
+    # Its own image name, so the dev image never replaces the built one from docker-compose.yml.
+    image: gleaner-frontend-dev
+    build:
+      context: ./frontend
+      target: dev
+    # node_modules lives in a Docker volume, never in the synced folder. It is reinstalled
+    # only when package-lock.json changes (for example after an update synced from the other machine).
+    command: >-
+      sh -c 'lock=$$(sha1sum package-lock.json | cut -c1-40);
+      if [ "$$(cat node_modules/.lock-sha1 2>/dev/null)" != "$$lock" ]; then
+      npm ci --no-audit --no-fund && echo "$$lock" > node_modules/.lock-sha1; fi;
+      exec npm run dev -- --host 0.0.0.0 --port 5180 --strictPort'
+    environment:
+      API_URL: ${API_URL:-http://backend:8000}
+      VITE_POLL: "1"
+    ports:
+      - "5180:5180"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+volumes:
+  frontend-node-modules:
+  gleaner-data:

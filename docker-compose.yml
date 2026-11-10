@@ -1,0 +1,48 @@
+# Launch everything:   docker compose up -d --build
+# Then open:           http://localhost:8080   (admin@meridian.demo / Gleaner!2026)
+# Re-seed demo data:   docker compose run --rm backend python seed.py
+# Stop:                docker compose down        (add -v to also delete the database)
+
+name: gleaner
+
+services:
+  backend:
+    build: ./backend
+    env_file:
+      # Your settings (JWT_SECRET, LOCAL_LLM_MODEL). Optional: without it the app uses
+      # a dev secret and the default local model.
+      - path: ./backend/.env
+        required: false
+    environment:
+      # The local LLM runs outside Docker (in Ollama) so it can use the GPU.
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-http://host.docker.internal:11434}
+      # These override backend/.env, which is set up for running outside Docker.
+      PUBLIC_BASE_URL: http://127.0.0.1:8000
+      DATABASE_URL: sqlite:////app/data/gleaner.db
+      CORS_ORIGINS: '["http://localhost:${GLEANER_PORT:-8080}","http://127.0.0.1:${GLEANER_PORT:-8080}"]'
+    # Lets the container reach Ollama running on this machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - gleaner-data:/app/data
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s # the first start seeds the demo data, which takes about a minute
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${GLEANER_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  gleaner-data:

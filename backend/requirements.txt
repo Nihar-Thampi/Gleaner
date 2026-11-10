@@ -1,0 +1,15 @@
+fastapi[standard]>=0.115
+sqlalchemy>=2.0
+pydantic>=2.7
+pydantic-settings>=2.3
+email-validator>=2.1
+bcrypt>=4.1
+pyjwt>=2.8
+httpx>=0.27
+parsel>=1.9
+lxml>=5.0
+openpyxl>=3.1
+# Optional, for pages that need JavaScript (then run: playwright install chromium)
+playwright>=1.45
+# tests
+pytest>=8.0
